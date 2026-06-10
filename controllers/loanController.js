@@ -1,4 +1,4 @@
-const { QueryCommand, PutCommand, UpdateCommand, ScanCommand, DeleteCommand, GetCommand } = require("@aws-sdk/lib-dynamodb");
+const { QueryCommand, PutCommand, UpdateCommand, DeleteCommand, GetCommand } = require("@aws-sdk/lib-dynamodb");
 const { docClient } = require("../config/dynamodb");
 const { ulid } = require("ulid");
 const logger = require("../utils/logger");
@@ -47,7 +47,7 @@ exports.requestLoan = async (req, res) => {
             Item: {
                 pk: `LOAN_REQ#${loanReqId}`,
                 sk: `LOAN_REQ#${loanReqId}`,
-                gsipk: `USER#${userId}`,
+                gsipk: `STATUS#PENDING`,
                 gsisk: timestamp.toString(),
                 userId,
                 loanReqId,
@@ -97,12 +97,13 @@ exports.updateLoanStatus = async (req, res) => {
                 pk: `LOAN_REQ#${loanReqId}`,
                 sk: `LOAN_REQ#${loanReqId}`
             },
-            UpdateExpression: "SET #status = :status, updatedAt = :updatedAt",
+            UpdateExpression: "SET #status = :status, gsipk = :gsipk, updatedAt = :updatedAt",
             ExpressionAttributeNames: {
                 "#status": "status"
             },
             ExpressionAttributeValues: {
                 ":status": status,
+                ":gsipk": `STATUS#${status}`,
                 ":updatedAt": Date.now()
             },
             ReturnValues: "ALL_NEW"
@@ -158,19 +159,16 @@ exports.updateLoanStatus = async (req, res) => {
 
 exports.getCompletedLoans = async (req, res) => {
     try {
-        const scanCommand = new ScanCommand({
+        const queryCommand = new QueryCommand({
             TableName: TABLE_NAME,
-            FilterExpression: "begins_with(pk, :pkPrefix) AND #status = :status",
-            ExpressionAttributeNames: {
-                "#status": "status"
-            },
+            IndexName: INDEX_NAME,
+            KeyConditionExpression: "gsipk = :gsipk",
             ExpressionAttributeValues: {
-                ":pkPrefix": "LOAN_REQ#",
-                ":status": "COMPLETED"
+                ":gsipk": "STATUS#COMPLETED"
             }
         });
 
-        const response = await docClient.send(scanCommand);
+        const response = await docClient.send(queryCommand);
 
         return res.status(200).json({
             message: "Completed loans fetched successfully",
@@ -186,19 +184,16 @@ exports.getCompletedLoans = async (req, res) => {
 
 exports.getPendingLoans = async (req, res) => {
     try {
-        const scanCommand = new ScanCommand({
+        const queryCommand = new QueryCommand({
             TableName: TABLE_NAME,
-            FilterExpression: "begins_with(pk, :pkPrefix) AND #status = :status",
-            ExpressionAttributeNames: {
-                "#status": "status"
-            },
+            IndexName: INDEX_NAME,
+            KeyConditionExpression: "gsipk = :gsipk",
             ExpressionAttributeValues: {
-                ":pkPrefix": "LOAN_REQ#",
-                ":status": "PENDING"
+                ":gsipk": "STATUS#PENDING"
             }
         });
 
-        const response = await docClient.send(scanCommand);
+        const response = await docClient.send(queryCommand);
 
         return res.status(200).json({
             message: "Pending loans fetched successfully",
@@ -214,19 +209,16 @@ exports.getPendingLoans = async (req, res) => {
 
 exports.clearCompletedLoans = async (req, res) => {
     try {
-        const scanCommand = new ScanCommand({
+        const queryCommand = new QueryCommand({
             TableName: TABLE_NAME,
-            FilterExpression: "begins_with(pk, :pkPrefix) AND #status = :status",
-            ExpressionAttributeNames: {
-                "#status": "status"
-            },
+            IndexName: INDEX_NAME,
+            KeyConditionExpression: "gsipk = :gsipk",
             ExpressionAttributeValues: {
-                ":pkPrefix": "LOAN_REQ#",
-                ":status": "COMPLETED"
+                ":gsipk": "STATUS#COMPLETED"
             }
         });
 
-        const response = await docClient.send(scanCommand);
+        const response = await docClient.send(queryCommand);
 
         if (!response.Items || response.Items.length === 0) {
             return res.status(200).json({ message: "No completed loans found to clear." });
