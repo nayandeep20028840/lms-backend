@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { ulid } = require("ulid");
 const { sendEmail, sendGChatMessage } = require("../services/notificationService");
+const logger = require("../utils/logger");
 
 const TABLE_NAME = "CBS_POC_LMS";
 const INDEX_NAME = "gsi";
@@ -58,7 +59,7 @@ exports.login = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Login error:", error);
+    logger.error("Login error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -112,7 +113,7 @@ exports.signup = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Signup error:", error);
+    logger.error("Signup error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -156,14 +157,14 @@ exports.forgotPassword = async (req, res) => {
 
     const emailBody = `Your password reset OTP is: ${otp}. It will expire in 10 minutes.`;
     await Promise.all([
-      sendEmail(email, "Password Reset OTP", emailBody).catch(e => console.error("Email failed:", e)),
-      sendGChatMessage(`Password reset requested for ${email}. OTP: ${otp}`).catch(e => console.error("GChat failed:", e))
+      sendEmail(email, "Password Reset OTP", emailBody).catch(e => logger.error("Email failed:", e)),
+      sendGChatMessage(`Password reset requested for ${email}. OTP: ${otp}`).catch(e => logger.error("GChat failed:", e))
     ]);
 
     res.status(200).json({ message: "An OTP has been sent." });
 
   } catch (error) {
-    console.error("Forgot password error:", error);
+    logger.error("Forgot password error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -186,7 +187,7 @@ exports.verifyOtp = async (req, res) => {
     });
 
     const response = await docClient.send(queryCommand);
-    console.log("Response -> ", response)
+    logger.info("Response -> ", response);
     if (!response.Items || response.Items.length === 0) {
       return res.status(400).json({ error: "Invalid or expired OTP" });
     }
@@ -204,7 +205,7 @@ exports.verifyOtp = async (req, res) => {
     res.status(200).json({ message: "OTP verified successfully. You may now reset your password." });
 
   } catch (error) {
-    console.error("Verify OTP error:", error);
+    logger.error("Verify OTP error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -250,7 +251,7 @@ exports.resetPassword = async (req, res) => {
     res.status(200).json({ message: "Password has been successfully updated." });
 
   } catch (error) {
-    console.error("Reset password error:", error);
+    logger.error("Reset password error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };

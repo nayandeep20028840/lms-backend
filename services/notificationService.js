@@ -1,5 +1,6 @@
 const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses");
 const axios = require("axios");
+const logger = require("../utils/logger");
 
 // AWS ses client
 const sesClient = new SESClient({
@@ -28,9 +29,9 @@ const sendEmail = async (toEmail, subject, body) => {
         });
 
         await sesClient.send(command);
-        console.log(`Email successfully sent to ${toEmail}`);
+        logger.info(`Email successfully sent to ${toEmail}`);
     } catch (error) {
-        console.error("Error sending SES email:", error);
+        logger.error("Error sending SES email:", error);
         throw error;
     }
 };
@@ -46,9 +47,9 @@ const sendGChatMessage = async (message) => {
         await axios.post(webhookUrl, {
             text: message
         });
-        console.log("Message successfully sent to G-Chat group.");
+        logger.info("Message successfully sent to G-Chat group.");
     } catch (error) {
-        console.error("Error sending G-Chat message:", error);
+        logger.error("Error sending G-Chat message:", error);
     }
 };
 

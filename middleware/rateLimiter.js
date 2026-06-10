@@ -4,7 +4,7 @@ const loanRateLimiter = rateLimit({
     windowMs: 30 * 1000,
     max: 1,
     keyGenerator: (req) => {
-        return req.user ? req.user.id : req.ip;
+        return req.user ? req.user.id : 'unauthenticated_user';
     },
     handler: (req, res) => {
         res.status(429).json({
@@ -16,3 +16,4 @@ const loanRateLimiter = rateLimit({
 module.exports = {
     loanRateLimiter
 };
+ 

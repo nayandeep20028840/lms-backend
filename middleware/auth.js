@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const logger = require("../utils/logger");
 
 const authMiddleware = (req, res, next) => {
   try {
@@ -20,7 +21,7 @@ const authMiddleware = (req, res, next) => {
 
     next();
   } catch (error) {
-    console.error("JWT Verification Error:", error);
+    logger.error("JWT Verification Error:", error);
     return res.status(401).json({ error: "Unauthorized: Token is invalid or expired" });
   }
 };
