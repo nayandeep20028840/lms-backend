@@ -18,7 +18,6 @@ router.post('/verify-otp', authController.verifyOtp);
 router.post('/reset-password', authController.resetPassword);
 
 // S3 Routes
-
 router.post('/upload-url', s3Controller.generateUploadUrl);
 router.get('/download-url', s3Controller.generateDownloadUrl);
 router.post('/confirm-upload', authMiddleware, s3Controller.confirmUpload);
@@ -27,5 +26,8 @@ router.post('/confirm-upload', authMiddleware, s3Controller.confirmUpload);
 router.post('/request-loan', authMiddleware, loanRateLimiter, loanController.requestLoan);
 router.put('/loan/:loanReqId/status', authMiddleware, loanRateLimiter, loanController.updateLoanStatus);
 router.get('/loans/completed', authMiddleware, loanController.getCompletedLoans);
+router.get('/loans/pending', authMiddleware, loanController.getPendingLoans);
+router.get('/loans/pool', authMiddleware, loanController.getLoanPool);
+router.delete('/loans/history', authMiddleware, loanController.clearCompletedLoans);
 
 module.exports = router;

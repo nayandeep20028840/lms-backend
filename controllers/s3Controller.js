@@ -56,7 +56,7 @@ exports.confirmUpload = async (req, res) => {
                 pk: `DOCUMENT#${documentId}`,
                 sk: `DOCUMENT#${documentId}`,
                 gsipk: `USER#${userId}`,
-                gsisk: timestamp,
+                gsisk: timestamp.toString(),
                 userId,
                 documentId,
                 documentType,
