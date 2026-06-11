@@ -1,4 +1,4 @@
-const { QueryCommand, PutCommand, UpdateCommand, DeleteCommand, GetCommand } = require("@aws-sdk/lib-dynamodb");
+const { QueryCommand, PutCommand, UpdateCommand, DeleteCommand, GetCommand, TransactWriteCommand } = require("@aws-sdk/lib-dynamodb");
 const { docClient } = require("../config/dynamodb");
 const { ulid } = require("ulid");
 const logger = require("../utils/logger");
@@ -91,65 +91,126 @@ exports.updateLoanStatus = async (req, res) => {
             return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
         }
 
-        const updateCommand = new UpdateCommand({
+        const getCommand = new GetCommand({
             TableName: TABLE_NAME,
             Key: {
                 pk: `LOAN_REQ#${loanReqId}`,
                 sk: `LOAN_REQ#${loanReqId}`
-            },
-            UpdateExpression: "SET #status = :status, gsipk = :gsipk, updatedAt = :updatedAt",
-            ExpressionAttributeNames: {
-                "#status": "status"
-            },
-            ExpressionAttributeValues: {
-                ":status": status,
-                ":gsipk": `STATUS#${status}`,
-                ":updatedAt": Date.now()
-            },
-            ReturnValues: "ALL_NEW"
+            }
         });
+        const loanData = await docClient.send(getCommand);
 
-        const result = await docClient.send(updateCommand);
+        if (!loanData.Item) {
+            return res.status(404).json({ error: "Loan request not found" });
+        }
+
+        if (loanData.Item.status === status) {
+            return res.status(400).json({ error: `Loan is already ${status}` });
+        }
 
         if (status === "COMPLETED") {
-            const getCommand = new GetCommand({
+            const poolQuery = new QueryCommand({
+                TableName: TABLE_NAME,
+                IndexName: INDEX_NAME,
+                KeyConditionExpression: "gsipk = :gsipk",
+                ExpressionAttributeValues: {
+                    ":gsipk": "LOAN#VALUE"
+                }
+            });
+            const poolResult = await docClient.send(poolQuery);
+            const poolItem = poolResult.Items[0];
+
+            if (!poolItem) {
+                return res.status(500).json({ error: "Pool not found" });
+            }
+
+            const transactWriteCommand = new TransactWriteCommand({
+                TransactItems: [
+                    {
+                        Update: {
+                            TableName: TABLE_NAME,
+                            Key: {
+                                pk: `LOAN_REQ#${loanReqId}`,
+                                sk: `LOAN_REQ#${loanReqId}`
+                            },
+                            UpdateExpression: "SET #status = :status, gsipk = :gsipk, updatedAt = :updatedAt",
+                            ConditionExpression: "#status <> :status",
+                            ExpressionAttributeNames: {
+                                "#status": "status"
+                            },
+                            ExpressionAttributeValues: {
+                                ":status": status,
+                                ":gsipk": `STATUS#${status}`,
+                                ":updatedAt": Date.now()
+                            }
+                        }
+                    },
+                    {
+                        Update: {
+                            TableName: TABLE_NAME,
+                            Key: { pk: poolItem.pk, sk: poolItem.sk },
+                            UpdateExpression: "SET #val = #val - :amt",
+                            ConditionExpression: "#val >= :amt",
+                            ExpressionAttributeNames: { "#val": "value" },
+                            ExpressionAttributeValues: { ":amt": Number(loanData.Item.amount) }
+                        }
+                    }
+                ]
+            });
+
+            try {
+                await docClient.send(transactWriteCommand);
+            } catch (err) {
+                if (err.name === 'TransactionCanceledException') {
+                    const reasons = err.CancellationReasons;
+                    if (reasons[0].Code === 'ConditionalCheckFailed') {
+                        return res.status(400).json({ error: "Loan status was already updated by another request." });
+                    }
+                    if (reasons[1].Code === 'ConditionalCheckFailed') {
+                        return res.status(400).json({ error: "Insufficient funds in the pool to complete this loan." });
+                    }
+                }
+                throw err;
+            }
+
+            return res.status(200).json({
+                message: "Loan completed and pool updated successfully",
+                updatedLoan: { ...loanData.Item, status, gsipk: `STATUS#${status}` }
+            });
+
+        } else {
+            const updateCommand = new UpdateCommand({
                 TableName: TABLE_NAME,
                 Key: {
                     pk: `LOAN_REQ#${loanReqId}`,
                     sk: `LOAN_REQ#${loanReqId}`
-                }
+                },
+                UpdateExpression: "SET #status = :status, gsipk = :gsipk, updatedAt = :updatedAt",
+                ConditionExpression: "#status <> :status",
+                ExpressionAttributeNames: {
+                    "#status": "status"
+                },
+                ExpressionAttributeValues: {
+                    ":status": status,
+                    ":gsipk": `STATUS#${status}`,
+                    ":updatedAt": Date.now()
+                },
+                ReturnValues: "ALL_NEW"
             });
-            const loanData = await docClient.send(getCommand);
-            
-            if (loanData.Item && loanData.Item.amount) {
-                const poolQuery = new QueryCommand({
-                    TableName: TABLE_NAME,
-                    IndexName: INDEX_NAME,
-                    KeyConditionExpression: "gsipk = :gsipk",
-                    ExpressionAttributeValues: {
-                        ":gsipk": "LOAN#VALUE"
-                    }
-                });
-                const poolResult = await docClient.send(poolQuery);
-                const poolItem = poolResult.Items.find(item => item.gsisk === "POOL" || item.value > 0);
 
-                if (poolItem) {
-                    const poolDecreaseCommand = new UpdateCommand({
-                        TableName: TABLE_NAME,
-                        Key: { pk: poolItem.pk, sk: poolItem.sk },
-                        UpdateExpression: "SET #val = #val - :amt",
-                        ExpressionAttributeNames: { "#val": "value" },
-                        ExpressionAttributeValues: { ":amt": Number(loanData.Item.amount) }
-                    });
-                    await docClient.send(poolDecreaseCommand);
+            try {
+                const result = await docClient.send(updateCommand);
+                return res.status(200).json({
+                    message: "Loan status updated successfully",
+                    updatedLoan: result.Attributes
+                });
+            } catch (err) {
+                if (err.name === 'ConditionalCheckFailedException') {
+                    return res.status(400).json({ error: "Loan status was already updated by another request." });
                 }
+                throw err;
             }
         }
-
-        return res.status(200).json({
-            message: "Loan status updated successfully",
-            updatedLoan: result.Attributes
-        });
 
     } catch (error) {
         logger.error("Error updating loan status:", error);
