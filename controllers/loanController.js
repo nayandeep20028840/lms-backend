@@ -1,4 +1,4 @@
-const { QueryCommand, PutCommand, UpdateCommand, DeleteCommand, GetCommand, TransactWriteCommand } = require("@aws-sdk/lib-dynamodb");
+const { QueryCommand, PutCommand, UpdateCommand, DeleteCommand, GetCommand, TransactWriteCommand, BatchWriteCommand } = require("@aws-sdk/lib-dynamodb");
 const { docClient } = require("../config/dynamodb");
 const { ulid } = require("ulid");
 const logger = require("../utils/logger");
@@ -11,7 +11,8 @@ exports.requestLoan = async (req, res) => {
         const { amount, name, email, age, type, documents } = req.body;
         const userId = req.user.id;
 
-        if (!amount || amount <= 0) {
+        const parsedAmount = Number(amount);
+        if (isNaN(parsedAmount) || parsedAmount <= 0) {
             return res.status(400).json({ error: "A valid loan amount is required" });
         }
 
@@ -31,11 +32,11 @@ exports.requestLoan = async (req, res) => {
             totalAvailablePool = poolResponse.Items.reduce((acc, item) => acc + (item.value || 0), 0);
         }
 
-        if (totalAvailablePool < amount) {
+        if (totalAvailablePool < parsedAmount) {
             return res.status(400).json({
                 error: "Insufficient loan pool available",
                 availablePool: totalAvailablePool,
-                requestedAmount: amount
+                requestedAmount: parsedAmount
             });
         }
 
@@ -51,7 +52,7 @@ exports.requestLoan = async (req, res) => {
                 gsisk: timestamp.toString(),
                 userId,
                 loanReqId,
-                amount: Number(amount),
+                amount: parsedAmount,
                 name,
                 email,
                 age,
@@ -68,7 +69,7 @@ exports.requestLoan = async (req, res) => {
             message: "Loan request submitted successfully",
             loanReqId,
             status: "PENDING",
-            requestedAmount: Number(amount)
+            requestedAmount: parsedAmount
         });
 
     } catch (error) {
@@ -152,7 +153,7 @@ exports.updateLoanStatus = async (req, res) => {
                             UpdateExpression: "SET #val = #val - :amt",
                             ConditionExpression: "#val >= :amt",
                             ExpressionAttributeNames: { "#val": "value" },
-                            ExpressionAttributeValues: { ":amt": Number(loanData.Item.amount) }
+                            ExpressionAttributeValues: { ":amt": loanData.Item.amount }
                         }
                     }
                 ]
@@ -285,16 +286,16 @@ exports.clearCompletedLoans = async (req, res) => {
             return res.status(200).json({ message: "No completed loans found to clear." });
         }
 
-        for (const loan of response.Items) {
-            const deleteCommand = new DeleteCommand({
-                TableName: TABLE_NAME,
-                Key: {
-                    pk: loan.pk,
-                    sk: loan.sk
-                }
-            });
-            await docClient.send(deleteCommand);
+        const batches = [];
+        for (let i = 0; i < response.Items.length; i += 25) {
+            const batch = response.Items.slice(i, i + 25).map(loan => ({
+                DeleteRequest: { Key: { pk: loan.pk, sk: loan.sk } }
+            }));
+            batches.push(docClient.send(new BatchWriteCommand({
+                RequestItems: { [TABLE_NAME]: batch }
+            })));
         }
+        await Promise.all(batches);
 
         return res.status(200).json({
             message: "Completed transaction history cleared successfully",
