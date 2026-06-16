@@ -7,6 +7,7 @@ const loanController = require('../controllers/loanController');
 
 // Middleware
 const authMiddleware = require('../middleware/auth');
+const rateLimiter = require('../middleware/rateLimiter');
 
 router.get('/health', (req, res) => {
     res.status(200).json({ status: 'ok' });
@@ -24,7 +25,7 @@ router.get('/download-url', s3Controller.generateDownloadUrl);
 router.post('/confirm-upload', authMiddleware, s3Controller.confirmUpload);
 
 // Loan Routes
-router.post('/request-loan', authMiddleware, loanController.requestLoan);
+router.post('/request-loan', authMiddleware, rateLimiter('requestLoan', 5), loanController.requestLoan);
 router.put('/loan/:loanReqId/status', authMiddleware, loanController.updateLoanStatus);
 router.get('/loans/completed', authMiddleware, loanController.getCompletedLoans);
 router.get('/loans/pending', authMiddleware, loanController.getPendingLoans);
